@@ -13,7 +13,7 @@ import {
   ReferenceLine,
 } from "recharts";
 import { StockDataPoint, AnalysisResult } from "@/lib/algorithms";
-import { CandlestickIcon, LineChart as LineChartIcon } from "lucide-react";
+import { CandlestickChartIcon, LineChart as LineChartIcon } from "lucide-react";
 
 interface PriceChartProps {
   data: StockDataPoint[];
