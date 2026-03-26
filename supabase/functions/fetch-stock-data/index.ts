@@ -32,44 +32,76 @@ serve(async (req) => {
     const period1 = urlObj.searchParams.get("period1") || "0";
     const period2 = urlObj.searchParams.get("period2") || Math.floor(Date.now() / 1000).toString();
 
-    // Fetch CSV data from Yahoo Finance
-    const csvUrl = `https://query1.finance.yahoo.com/v7/finance/download/${ticker}?period1=${period1}&period2=${period2}&interval=1d&events=history&includeAdjustedClose=true`;
+    // Use the v8 chart API (publicly accessible, no auth required)
+    const chartUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?period1=${period1}&period2=${period2}&interval=1d&includePrePost=false`;
 
-    console.log("Fetching:", csvUrl);
+    console.log("Fetching:", chartUrl);
 
-    const response = await fetch(csvUrl, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-      },
-    });
+    let responseData: any = null;
 
-    if (!response.ok) {
-      // Fallback: try query2
-      const fallbackUrl = `https://query2.finance.yahoo.com/v7/finance/download/${ticker}?period1=${period1}&period2=${period2}&interval=1d&events=history&includeAdjustedClose=true`;
-      const fallbackResp = await fetch(fallbackUrl, {
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        },
-      });
+    for (const domain of ["query1", "query2"]) {
+      const fetchUrl = `https://${domain}.finance.yahoo.com/v8/finance/chart/${ticker}?period1=${period1}&period2=${period2}&interval=1d&includePrePost=false`;
+      try {
+        const response = await fetch(fetchUrl, {
+          headers: {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "application/json",
+            "Accept-Language": "en-US,en;q=0.9",
+          },
+        });
 
-      if (!fallbackResp.ok) {
-        const text = await fallbackResp.text();
-        console.error("Yahoo Finance error:", fallbackResp.status, text);
-        return new Response(
-          JSON.stringify({ error: `Failed to fetch data for ${ticker}. Yahoo Finance returned ${fallbackResp.status}.` }),
-          { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
+        if (response.ok) {
+          responseData = await response.json();
+          break;
+        } else {
+          const text = await response.text();
+          console.error(`${domain} error:`, response.status, text);
+        }
+      } catch (e) {
+        console.error(`${domain} fetch error:`, e);
       }
+    }
 
-      const csv = await fallbackResp.text();
-      const data = parseCSV(csv, ticker);
-      return new Response(JSON.stringify({ ticker, data }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+    if (!responseData) {
+      return new Response(
+        JSON.stringify({ error: `Failed to fetch data for ${ticker}. Yahoo Finance API unavailable.` }),
+        { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    const result = responseData?.chart?.result?.[0];
+    if (!result) {
+      return new Response(
+        JSON.stringify({ error: `No data found for ${ticker}.` }),
+        { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    const timestamps = result.timestamp || [];
+    const quote = result.indicators?.quote?.[0] || {};
+    const adjClose = result.indicators?.adjclose?.[0]?.adjclose || [];
+
+    const data = [];
+    for (let i = 0; i < timestamps.length; i++) {
+      const close = quote.close?.[i];
+      if (close == null) continue;
+
+      const date = new Date(timestamps[i] * 1000);
+      const dateStr = date.toISOString().split("T")[0];
+
+      data.push({
+        date: dateStr,
+        open: quote.open?.[i] ?? close,
+        high: quote.high?.[i] ?? close,
+        low: quote.low?.[i] ?? close,
+        close,
+        volume: quote.volume?.[i] ?? 0,
+        adjClose: adjClose[i] ?? close,
       });
     }
 
-    const csv = await response.text();
-    const data = parseCSV(csv, ticker);
+    console.log(`Parsed ${data.length} data points for ${ticker}`);
+
     return new Response(JSON.stringify({ ticker, data }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
@@ -81,30 +113,3 @@ serve(async (req) => {
     );
   }
 });
-
-function parseCSV(csv: string, ticker: string) {
-  const lines = csv.trim().split("\n");
-  if (lines.length < 2) return [];
-
-  const headers = lines[0].split(",");
-  const data = [];
-
-  for (let i = 1; i < lines.length; i++) {
-    const values = lines[i].split(",");
-    if (values.length < 6) continue;
-    const close = parseFloat(values[4]);
-    if (isNaN(close) || values[4] === "null") continue;
-
-    data.push({
-      date: values[0],
-      open: parseFloat(values[1]) || close,
-      high: parseFloat(values[2]) || close,
-      low: parseFloat(values[3]) || close,
-      close,
-      volume: parseInt(values[5]) || 0,
-      adjClose: parseFloat(values[6]) || close,
-    });
-  }
-
-  return data;
-}
