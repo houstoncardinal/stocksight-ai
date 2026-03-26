@@ -46,6 +46,31 @@ function wmaPrediction(data: number[], periods: number): number {
   return wma + momentum * periods * 0.3;
 }
 
+// Adaptive prediction using multiple signals
+function adaptivePrediction(data: number[], periods: number, analysis: AnalysisResult): number {
+  const len = data.length - 1;
+  const lastPrice = data[len];
+  
+  // Mean reversion component using Bollinger position
+  const bbUpper = analysis.bollingerUpper[len];
+  const bbLower = analysis.bollingerLower[len];
+  let bbSignal = 0;
+  if (!isNaN(bbUpper) && !isNaN(bbLower)) {
+    const bbMid = analysis.bollingerMiddle[len];
+    const bbPos = (lastPrice - bbMid) / (bbUpper - bbLower);
+    bbSignal = -bbPos * 0.02 * periods; // Mean reversion
+  }
+
+  // RSI momentum
+  const rsiVal = analysis.rsi[len];
+  let rsiSignal = 0;
+  if (!isNaN(rsiVal)) {
+    rsiSignal = (50 - rsiVal) / 5000 * periods;
+  }
+
+  return lastPrice * (1 + bbSignal + rsiSignal);
+}
+
 // Determine signal from indicators
 export function determineSignal(data: StockDataPoint[], analysis: AnalysisResult): Signal {
   const len = data.length - 1;
@@ -74,14 +99,10 @@ export function determineSignal(data: StockDataPoint[], analysis: AnalysisResult
   const price = data[len].close;
   const sma20 = analysis.sma20[len];
   const sma50 = analysis.sma50[len];
-  if (!isNaN(sma20)) {
-    if (price > sma20) score += 1;
-    else score -= 1;
-  }
-  if (!isNaN(sma50)) {
-    if (price > sma50) score += 1;
-    else score -= 1;
-  }
+  const sma200 = analysis.sma200[len];
+  if (!isNaN(sma20)) { if (price > sma20) score += 1; else score -= 1; }
+  if (!isNaN(sma50)) { if (price > sma50) score += 1; else score -= 1; }
+  if (!isNaN(sma200)) { if (price > sma200) score += 1; else score -= 1; }
 
   // Bollinger position
   const bbUpper = analysis.bollingerUpper[len];
@@ -98,10 +119,31 @@ export function determineSignal(data: StockDataPoint[], analysis: AnalysisResult
     if (stochK > 80) score -= 1;
   }
 
-  if (score >= 5) return "STRONG_BUY";
-  if (score >= 2) return "BUY";
-  if (score <= -5) return "SHORT";
-  if (score <= -2) return "STRONG_SELL";
+  // ADX trend strength
+  const adxVal = analysis.adx[len];
+  if (!isNaN(adxVal) && adxVal > 25) {
+    // Strong trend — amplify existing signal
+    score = score > 0 ? score + 1 : score - 1;
+  }
+
+  // Williams %R
+  const wrVal = analysis.williamsR[len];
+  if (!isNaN(wrVal)) {
+    if (wrVal < -80) score += 1;
+    if (wrVal > -20) score -= 1;
+  }
+
+  // VWAP
+  const vwapVal = analysis.vwap[len];
+  if (!isNaN(vwapVal)) {
+    if (price > vwapVal) score += 1;
+    else score -= 1;
+  }
+
+  if (score >= 7) return "STRONG_BUY";
+  if (score >= 3) return "BUY";
+  if (score <= -7) return "SHORT";
+  if (score <= -3) return "STRONG_SELL";
   if (score <= -1) return "SELL";
   return "HOLD";
 }
@@ -120,14 +162,15 @@ export function generatePredictions(data: StockDataPoint[], analysis: AnalysisRe
   return frames.map(({ tf, label, periods }) => {
     const holt = holtSmoothing(closes, 0.3, 0.1, periods);
     const wma = wmaPrediction(closes, periods);
-    // Ensemble average
-    const predicted = (holt + wma) / 2;
+    const adaptive = adaptivePrediction(closes, periods, analysis);
+    // Ensemble with 3 models
+    const predicted = (holt * 0.35 + wma * 0.3 + adaptive * 0.35);
     const changePercent = ((predicted - lastPrice) / lastPrice) * 100;
 
     // Confidence decreases with time horizon
-    const baseConfidence = 75;
+    const baseConfidence = 78;
     const decay = Math.min(periods / 252, 1);
-    const confidence = Math.max(35, baseConfidence - decay * 40);
+    const confidence = Math.max(30, baseConfidence - decay * 45);
 
     let signal: Signal;
     if (changePercent > 10) signal = "STRONG_BUY";
