@@ -124,7 +124,7 @@ export default function PriceChart({ data, analysis }: PriceChartProps) {
               onClick={() => setChartMode("candle")}
               className={`p-1.5 rounded transition-colors ${chartMode === "candle" ? "bg-primary/20 text-primary" : "text-muted-foreground"}`}
             >
-              <CandlestickIcon className="w-3.5 h-3.5" />
+              <CandlestickChartIcon className="w-3.5 h-3.5" />
             </button>
           </div>
           <span className="text-[10px] text-muted-foreground mr-2 font-mono tracking-wider uppercase">Overlay</span>
