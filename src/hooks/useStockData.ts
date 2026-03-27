@@ -3,6 +3,23 @@ import { supabase } from "@/integrations/supabase/client";
 import { StockDataPoint, analyzeData, AnalysisResult } from "@/lib/algorithms";
 import { generatePredictions, determineSignal, Prediction, Signal } from "@/lib/predictions";
 
+export interface AIInsights {
+  sentiment: "bullish" | "bearish" | "neutral";
+  sentimentScore: number;
+  summary: string;
+  keyInsight: string;
+  risks: string[];
+  opportunities: string[];
+  priceOutlook: string;
+  confidence: number;
+  macroContext: string;
+  catalysts: string[];
+  headwinds: string[];
+  newsScore: number;
+  synthesisNote: string;
+  indicatorVsPredictionNote: string;
+}
+
 export interface StockAnalysis {
   ticker: string;
   data: StockDataPoint[];
@@ -12,6 +29,7 @@ export interface StockAnalysis {
   currentPrice: number;
   priceChange: number;
   priceChangePercent: number;
+  aiInsights: AIInsights | null;
 }
 
 export function useStockData() {
@@ -52,9 +70,10 @@ export function useStockData() {
         currentPrice: lastPrice,
         priceChange,
         priceChangePercent,
+        aiInsights: data.aiInsights ?? null,
       });
-    } catch (err: any) {
-      setError(err.message || "Failed to fetch data");
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to fetch data");
     } finally {
       setLoading(false);
     }

@@ -8,57 +8,56 @@ interface SignalBadgeProps {
 }
 
 const signalLabels: Record<Signal, string> = {
-  STRONG_BUY: "STRONG BUY",
-  BUY: "BUY",
-  HOLD: "HOLD",
-  SELL: "SELL",
+  STRONG_BUY:  "STRONG BUY",
+  BUY:         "BUY",
+  HOLD:        "HOLD",
+  SELL:        "SELL",
   STRONG_SELL: "STRONG SELL",
-  SHORT: "SHORT",
+  SHORT:       "SHORT",
 };
 
-const signalBg: Record<Signal, string> = {
-  STRONG_BUY: "bg-gain/15",
-  BUY: "bg-gain/10",
-  HOLD: "bg-warn/10",
-  SELL: "bg-loss/10",
-  STRONG_SELL: "bg-loss/15",
-  SHORT: "bg-signal-short/10",
+const signalStyles: Record<Signal, { bg: string; border: string }> = {
+  STRONG_BUY:  { bg: "bg-gain/15",           border: "border-gain/30" },
+  BUY:         { bg: "bg-gain/10",            border: "border-gain/20" },
+  HOLD:        { bg: "bg-warn/10",            border: "border-warn/20" },
+  SELL:        { bg: "bg-loss/10",            border: "border-loss/20" },
+  STRONG_SELL: { bg: "bg-loss/15",            border: "border-loss/30" },
+  SHORT:       { bg: "bg-[hsl(var(--signal-short))]/10", border: "border-[hsl(var(--signal-short))]/20" },
 };
 
 function SignalIcon({ signal, size }: { signal: Signal; size: number }) {
-  const props = { className: `w-${size} h-${size}`, style: { width: size * 4, height: size * 4 } };
+  const cls = `shrink-0`;
+  const style = { width: size, height: size };
   switch (signal) {
     case "STRONG_BUY":
-    case "BUY":
-      return <TrendingUp {...props} />;
+    case "BUY":        return <TrendingUp  className={cls} style={style} />;
     case "SELL":
-    case "STRONG_SELL":
-      return <TrendingDown {...props} />;
-    case "SHORT":
-      return <ArrowDownToLine {...props} />;
-    default:
-      return <Minus {...props} />;
+    case "STRONG_SELL":return <TrendingDown className={cls} style={style} />;
+    case "SHORT":      return <ArrowDownToLine className={cls} style={style} />;
+    default:           return <Minus className={cls} style={style} />;
   }
 }
 
 export default function SignalBadge({ signal, size = "sm" }: SignalBadgeProps) {
   const colorClass = getSignalColor(signal);
-  const glowClass = getSignalGlow(signal);
-  const isLarge = size === "lg";
+  const glowClass  = getSignalGlow(signal);
+  const isLarge    = size === "lg";
+  const { bg, border } = signalStyles[signal];
 
   return (
     <motion.div
-      initial={{ scale: 0.8, opacity: 0 }}
+      initial={{ scale: 0.85, opacity: 0 }}
       animate={{ scale: 1, opacity: 1 }}
-      whileHover={{ scale: 1.05 }}
-      className={`inline-flex items-center gap-2 rounded-lg border border-border/50 ${signalBg[signal]} ${glowClass} ${
-        isLarge ? "px-6 py-3.5" : "px-3 py-1.5"
+      whileHover={{ scale: 1.04 }}
+      whileTap={{ scale: 0.97 }}
+      className={`inline-flex items-center gap-2 rounded-xl border ${bg} ${border} ${glowClass} ${
+        isLarge ? "px-5 py-3" : "px-2.5 py-1.5"
       }`}
     >
       <span className={colorClass}>
-        <SignalIcon signal={signal} size={isLarge ? 5 : 3} />
+        <SignalIcon signal={signal} size={isLarge ? 18 : 12} />
       </span>
-      <span className={`font-mono font-bold tracking-wider ${colorClass} ${isLarge ? "text-xl" : "text-xs"}`}>
+      <span className={`font-bold tracking-wider ${colorClass} ${isLarge ? "text-lg" : "text-[10px]"}`}>
         {signalLabels[signal]}
       </span>
     </motion.div>

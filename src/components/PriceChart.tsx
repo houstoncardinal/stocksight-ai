@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
+import { useTheme } from "@/contexts/ThemeContext";
 import {
   ResponsiveContainer,
   ComposedChart,
@@ -11,23 +12,84 @@ import {
   CartesianGrid,
   Tooltip,
   ReferenceLine,
+  Scatter,
+  Cell,
 } from "recharts";
 import { StockDataPoint, AnalysisResult } from "@/lib/algorithms";
-import { CandlestickChartIcon, LineChart as LineChartIcon } from "lucide-react";
+import { CandlestickChartIcon, LineChart as LineChartIcon, History, TrendingUp, BarChart3, Activity, Layers, Clock } from "lucide-react";
+import { generateBacktest, BacktestResult } from "@/lib/predictions";
 
 interface PriceChartProps {
   data: StockDataPoint[];
   analysis: AnalysisResult;
+  enableBacktest?: boolean;
 }
 
-type ChartMode = "line" | "candle";
-type Overlay = "sma" | "ema" | "bollinger" | "vwap" | "none";
+type ChartMode = "line" | "candle" | "area" | "heikin";
+type Overlay = "sma" | "ema" | "bollinger" | "vwap" | "ichimoku" | "none";
+type TimeFrame = "1D" | "1W" | "1M" | "3M" | "6M" | "1Y" | "ALL";
+
+interface CandleShapeProps {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  payload: { isGreen: boolean; high: number; low: number };
+  background?: { y: number; height: number };
+}
 type SubChart = "volume" | "rsi" | "macd" | "stoch" | "adx" | "wr";
 
-export default function PriceChart({ data, analysis }: PriceChartProps) {
+export default function PriceChart({ data, analysis, enableBacktest = false }: PriceChartProps) {
+  const { theme } = useTheme();
+  const isDark = theme === "dark";
   const [overlay, setOverlay] = useState<Overlay>("bollinger");
   const [subChart, setSubChart] = useState<SubChart>("volume");
   const [chartMode, setChartMode] = useState<ChartMode>("line");
+  const [timeFrame, setTimeFrame] = useState<TimeFrame>("3M");
+  const [showBacktest, setShowBacktest] = useState(false);
+
+  // Timeframe filtering
+  const filteredData = useMemo(() => {
+    if (!data.length) return [];
+    const now = new Date(data[data.length - 1].date);
+    let lookbackDays = 90; // 3M default
+    
+    switch (timeFrame) {
+      case "1D": lookbackDays = 1; break;
+      case "1W": lookbackDays = 7; break;
+      case "1M": lookbackDays = 30; break;
+      case "3M": lookbackDays = 90; break;
+      case "6M": lookbackDays = 180; break;
+      case "1Y": lookbackDays = 365; break;
+      case "ALL": return data;
+    }
+    
+    const cutoff = new Date(now.getTime() - lookbackDays * 24 * 60 * 60 * 1000);
+    return data.filter(d => new Date(d.date) >= cutoff);
+  }, [data, timeFrame]);
+
+  // Generate backtest data
+  const backtestResult = useMemo(() => {
+    if (!enableBacktest || data.length < 60) return null;
+    return generateBacktest(data, analysis);
+  }, [data, analysis, enableBacktest]);
+
+  // Map backtest predictions to chart data
+  const backtestData = useMemo(() => {
+    if (!backtestResult) return [];
+    return backtestResult.predictions.map(p => {
+      const dataPoint = data.find(d => d.date === p.date);
+      if (!dataPoint) return null;
+      const index = data.findIndex(d => d.date === p.date);
+      return {
+        date: p.date,
+        predicted: p.predictedPrice,
+        actual: p.actualPrice,
+        x: index,
+        y: p.predictedPrice,
+      };
+    }).filter(Boolean);
+  }, [backtestResult, data]);
 
   const chartData = useMemo(() => {
     return data.map((d, i) => ({
@@ -54,6 +116,12 @@ export default function PriceChart({ data, analysis }: PriceChartProps) {
       vwap: isNaN(analysis.vwap[i]) ? undefined : analysis.vwap[i],
       adx: isNaN(analysis.adx[i]) ? undefined : analysis.adx[i],
       wr: isNaN(analysis.williamsR[i]) ? undefined : analysis.williamsR[i],
+      tenkan: isNaN(analysis.tenkan[i]) ? undefined : analysis.tenkan[i],
+      kijun: isNaN(analysis.kijun[i]) ? undefined : analysis.kijun[i],
+      senkouA: isNaN(analysis.senkouA[i]) ? undefined : analysis.senkouA[i],
+      senkouB: isNaN(analysis.senkouB[i]) ? undefined : analysis.senkouB[i],
+      ema9: isNaN(analysis.ema9[i]) ? undefined : analysis.ema9[i],
+      ema21: isNaN(analysis.ema21[i]) ? undefined : analysis.ema21[i],
       // Candlestick helpers
       candleBody: d.close >= d.open ? [d.open, d.close] : [d.close, d.open],
       isGreen: d.close >= d.open,
@@ -74,11 +142,12 @@ export default function PriceChart({ data, analysis }: PriceChartProps) {
   };
 
   const overlayBtns: { key: Overlay; label: string }[] = [
-    { key: "none", label: "None" },
-    { key: "sma", label: "SMA" },
-    { key: "ema", label: "EMA" },
-    { key: "bollinger", label: "BB" },
-    { key: "vwap", label: "VWAP" },
+    { key: "none",      label: "None"     },
+    { key: "sma",       label: "SMA"      },
+    { key: "ema",       label: "EMA"      },
+    { key: "bollinger", label: "BB"       },
+    { key: "vwap",      label: "VWAP"     },
+    { key: "ichimoku",  label: "Ichimoku" },
   ];
 
   const subBtns: { key: SubChart; label: string }[] = [
@@ -91,74 +160,142 @@ export default function PriceChart({ data, analysis }: PriceChartProps) {
   ];
 
   const tooltipStyle = {
-    backgroundColor: "hsl(225,22%,8%)",
-    border: "1px solid hsl(225,15%,18%)",
-    borderRadius: 8,
+    backgroundColor: isDark ? "hsl(225,22%,9%)" : "hsl(0,0%,100%)",
+    border: isDark ? "1px solid hsl(225,15%,18%)" : "1px solid hsl(220,13%,88%)",
+    borderRadius: 10,
     fontSize: 11,
     fontFamily: "JetBrains Mono",
-    boxShadow: "0 10px 30px rgba(0,0,0,0.4)",
+    boxShadow: isDark ? "0 8px 32px rgba(0,0,0,0.5)" : "0 4px 24px rgba(0,0,0,0.10)",
+    color: isDark ? "hsl(210,20%,90%)" : "hsl(222,47%,11%)",
   };
 
-  const gridStroke = "hsl(225,15%,12%)";
-  const tickStyle = { fontSize: 10, fill: "hsl(220,15%,40%)" };
+  const gridStroke = isDark ? "hsl(225,15%,13%)" : "hsl(220,13%,91%)";
+  const tickStyle = { fontSize: 10, fill: isDark ? "hsl(220,15%,40%)" : "hsl(215,16%,55%)" };
 
   return (
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ delay: 0.2 }}
-      className="glass-card relative rounded-xl overflow-hidden"
+      className="glass-card relative rounded-2xl overflow-hidden"
     >
       {/* Controls */}
-      <div className="flex items-center justify-between px-4 py-2.5 border-b border-border">
-        <div className="flex items-center gap-1">
+      <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-b border-border/60">
+        <div className="flex items-center gap-1.5 flex-wrap">
           {/* Chart mode toggle */}
-          <div className="flex items-center bg-secondary/50 rounded-md p-0.5 mr-3">
+          <div className="flex items-center bg-secondary rounded-xl p-0.5 mr-1">
             <button
               onClick={() => setChartMode("line")}
-              className={`p-1.5 rounded transition-colors ${chartMode === "line" ? "bg-primary/20 text-primary" : "text-muted-foreground"}`}
+              title="Line chart"
+              className={`p-1.5 rounded-lg transition-all ${chartMode === "line" ? "bg-card shadow-sm text-primary" : "text-muted-foreground hover:text-foreground"}`}
             >
               <LineChartIcon className="w-3.5 h-3.5" />
             </button>
             <button
               onClick={() => setChartMode("candle")}
-              className={`p-1.5 rounded transition-colors ${chartMode === "candle" ? "bg-primary/20 text-primary" : "text-muted-foreground"}`}
+              title="Candlestick chart"
+              className={`p-1.5 rounded-lg transition-all ${chartMode === "candle" ? "bg-card shadow-sm text-primary" : "text-muted-foreground hover:text-foreground"}`}
             >
               <CandlestickChartIcon className="w-3.5 h-3.5" />
             </button>
           </div>
-          <span className="text-[10px] text-muted-foreground mr-2 font-mono tracking-wider uppercase">Overlay</span>
+
+          {/* Timeframe selector */}
+          <div className="hidden sm:flex items-center bg-secondary rounded-lg p-0.5 mr-2">
+            {(["1D", "1W", "1M", "3M", "6M", "1Y", "ALL"] as TimeFrame[]).map((tf) => (
+              <button
+                key={tf}
+                onClick={() => setTimeFrame(tf)}
+                className={`px-2 py-1 rounded-md text-[10px] font-bold transition-all ${
+                  timeFrame === tf
+                    ? "bg-card shadow-sm text-primary"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {tf}
+              </button>
+            ))}
+          </div>
+
+          <span className="text-[9px] font-bold text-muted-foreground/60 uppercase tracking-widest mr-0.5">Overlay</span>
           {overlayBtns.map((b) => (
             <button
               key={b.key}
               onClick={() => setOverlay(b.key)}
-              className={`px-2.5 py-1 rounded-md text-[11px] font-mono transition-all ${
+              className={`px-2.5 py-1.5 rounded-lg text-[11px] font-semibold transition-all ${
                 overlay === b.key
-                  ? "bg-primary/15 text-primary font-semibold"
-                  : "text-muted-foreground hover:text-foreground hover:bg-secondary/50"
+                  ? "bg-primary/12 text-primary border border-primary/20"
+                  : "text-muted-foreground hover:text-foreground hover:bg-secondary/70"
               }`}
             >
               {b.label}
             </button>
           ))}
         </div>
-        <div className="flex items-center gap-1">
-          <span className="text-[10px] text-muted-foreground mr-2 font-mono tracking-wider uppercase">Sub</span>
+
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="text-[9px] font-bold text-muted-foreground/60 uppercase tracking-widest mr-0.5">Sub</span>
           {subBtns.map((b) => (
             <button
               key={b.key}
               onClick={() => setSubChart(b.key)}
-              className={`px-2.5 py-1 rounded-md text-[11px] font-mono transition-all ${
+              className={`px-2.5 py-1.5 rounded-lg text-[11px] font-semibold transition-all ${
                 subChart === b.key
-                  ? "bg-accent/15 text-accent font-semibold"
-                  : "text-muted-foreground hover:text-foreground hover:bg-secondary/50"
+                  ? "bg-accent/12 text-accent border border-accent/20"
+                  : "text-muted-foreground hover:text-foreground hover:bg-secondary/70"
               }`}
             >
               {b.label}
             </button>
           ))}
+          
+          {/* Backtest Toggle */}
+          {enableBacktest && backtestResult && (
+            <button
+              onClick={() => setShowBacktest(!showBacktest)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-all ml-2 ${
+                showBacktest
+                  ? "bg-ai/12 text-ai border border-ai/20"
+                  : "text-muted-foreground hover:text-foreground hover:bg-secondary/70"
+              }`}
+            >
+              <History className="w-3 h-3" />
+              Backtest
+            </button>
+          )}
         </div>
       </div>
+
+      {/* Backtest Stats Bar */}
+      {showBacktest && backtestResult && (
+        <div className="px-4 py-2 border-b border-border/60 bg-ai/[0.03] flex flex-wrap items-center gap-4">
+          <div className="flex items-center gap-1.5">
+            <TrendingUp className="w-3.5 h-3.5 text-ai" />
+            <span className="text-[9px] font-bold uppercase tracking-widest text-ai">Model Accuracy</span>
+          </div>
+          <div className="flex items-center gap-3 text-[10px]">
+            <span className="flex items-center gap-1">
+              <span className="text-muted-foreground">MAPE:</span>
+              <span className={`font-bold ${backtestResult.accuracy.mape < 10 ? "text-gain" : backtestResult.accuracy.mape < 20 ? "text-warn" : "text-loss"}`}>
+                {backtestResult.accuracy.mape.toFixed(1)}%
+              </span>
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="text-muted-foreground">Directional:</span>
+              <span className={`font-bold ${backtestResult.accuracy.directional > 50 ? "text-gain" : "text-loss"}`}>
+                {backtestResult.accuracy.directional.toFixed(0)}%
+              </span>
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="text-muted-foreground">RMSE:</span>
+              <span className="font-bold text-foreground">${backtestResult.accuracy.rmse.toFixed(2)}</span>
+            </span>
+          </div>
+          <span className="text-[9px] text-muted-foreground ml-auto">
+            {backtestResult.predictions.length} predictions over 6 months
+          </span>
+        </div>
+      )}
 
       {/* Main Chart */}
       <div className="px-2 pt-3">
@@ -189,7 +326,7 @@ export default function PriceChart({ data, analysis }: PriceChartProps) {
 
             {chartMode === "candle" && (
               <>
-                <Bar dataKey="candleBody" fill="transparent" barSize={6} shape={(props: any) => {
+                <Bar dataKey="candleBody" fill="transparent" barSize={6} shape={(props: CandleShapeProps) => {
                   const { x, y, width, height, payload } = props;
                   const color = payload.isGreen ? "hsl(145,80%,48%)" : "hsl(0,85%,55%)";
                   const wickY = payload.high;
@@ -226,6 +363,39 @@ export default function PriceChart({ data, analysis }: PriceChartProps) {
             )}
             {overlay === "vwap" && (
               <Line type="monotone" dataKey="vwap" stroke="hsl(280,80%,60%)" strokeWidth={2} dot={false} name="VWAP" />
+            )}
+            {overlay === "ichimoku" && (
+              <>
+                <Line type="monotone" dataKey="tenkan"  stroke="hsl(38,96%,56%)"   strokeWidth={1.5} dot={false} name="Tenkan" />
+                <Line type="monotone" dataKey="kijun"   stroke="hsl(0,86%,57%)"    strokeWidth={1.5} dot={false} name="Kijun" />
+                <Line type="monotone" dataKey="senkouA" stroke="hsl(145,82%,50%)"  strokeWidth={1}   dot={false} strokeDasharray="3 2" name="Senkou A" />
+                <Line type="monotone" dataKey="senkouB" stroke="hsl(0,86%,57%)"    strokeWidth={1}   dot={false} strokeDasharray="3 2" name="Senkou B" />
+              </>
+            )}
+
+            {/* Backtest predictions overlay */}
+            {showBacktest && backtestData.length > 0 && (
+              <>
+                <Scatter
+                  data={backtestData}
+                  dataKey="y"
+                  fill="hsl(var(--ai-accent))"
+                  fillOpacity={0.8}
+                  shape="circle"
+                  r={4}
+                  name="Predicted"
+                />
+                <Line
+                  type="monotone"
+                  data={backtestData}
+                  dataKey="y"
+                  stroke="hsl(var(--ai-accent))"
+                  strokeWidth={2}
+                  strokeDasharray="5 3"
+                  dot={false}
+                  name="Model Prediction"
+                />
+              </>
             )}
           </ComposedChart>
         </ResponsiveContainer>
